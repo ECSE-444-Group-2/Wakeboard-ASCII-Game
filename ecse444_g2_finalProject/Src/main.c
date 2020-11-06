@@ -19,6 +19,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -49,6 +50,9 @@ TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
 
+osThreadId gameLoopHandle;
+osThreadId processSensorHandle;
+osThreadId refreshDisplayHandle;
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -61,6 +65,10 @@ static void MX_DAC1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_I2C2_Init(void);
+void StartGameLoop(void const * argument);
+void StartProcessSensor(void const * argument);
+void StartRefreshDisplay(void const * argument);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -107,6 +115,43 @@ int main(void)
 
   /* USER CODE END 2 */
 
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* definition and creation of gameLoop */
+  osThreadDef(gameLoop, StartGameLoop, osPriorityNormal, 0, 128);
+  gameLoopHandle = osThreadCreate(osThread(gameLoop), NULL);
+
+  /* definition and creation of processSensor */
+  osThreadDef(processSensor, StartProcessSensor, osPriorityNormal, 0, 128);
+  processSensorHandle = osThreadCreate(osThread(processSensor), NULL);
+
+  /* definition and creation of refreshDisplay */
+  osThreadDef(refreshDisplay, StartRefreshDisplay, osPriorityNormal, 0, 128);
+  refreshDisplayHandle = osThreadCreate(osThread(refreshDisplay), NULL);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -374,6 +419,81 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartGameLoop */
+/**
+  * @brief  Function implementing the gameLoop thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartGameLoop */
+void StartGameLoop(void const * argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_StartProcessSensor */
+/**
+* @brief Function implementing the processSensor thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartProcessSensor */
+void StartProcessSensor(void const * argument)
+{
+  /* USER CODE BEGIN StartProcessSensor */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartProcessSensor */
+}
+
+/* USER CODE BEGIN Header_StartRefreshDisplay */
+/**
+* @brief Function implementing the refreshDisplay thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartRefreshDisplay */
+void StartRefreshDisplay(void const * argument)
+{
+  /* USER CODE BEGIN StartRefreshDisplay */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartRefreshDisplay */
+}
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM6 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM6) {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
