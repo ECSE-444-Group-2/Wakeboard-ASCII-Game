@@ -9,10 +9,10 @@
   * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
   * All rights reserved.</center></h2>
   *
-  * This software component is licensed by ST under BSD 3-Clause license,
-  * the "License"; You may not use this file except in compliance with the
-  * License. You may obtain a copy of the License at:
-  *                        opensource.org/licenses/BSD-3-Clause
+  * This software component is licensed by ST under Ultimate Liberty license
+  * SLA0044, the "License"; You may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at:
+  *                             www.st.com/SLA0044
   *
   ******************************************************************************
   */
@@ -23,6 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+float gyroData[3];
 
 /* USER CODE END Includes */
 
@@ -112,7 +113,9 @@ int main(void)
   MX_USART1_UART_Init();
   MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
+  BSP_GYRO_Init();
 
+  BSP_GYRO_GetXYZ(gyroData);
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -463,7 +466,9 @@ void StartProcessSensor(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(10);
+    BSP_GYRO_GetXYZ(gyroData);
+
   }
   /* USER CODE END StartProcessSensor */
 }
@@ -481,7 +486,11 @@ void StartRefreshDisplay(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(10);
+    char buffer[48];
+	sprintf(buffer, "\nGyroscope: x = %d, y = %d, z = %d /// ", (int)gyroData[0], (int)gyroData[1], (int)gyroData[2]);
+	HAL_UART_Transmit(&huart1, buffer, 48, 10);
+
   }
   /* USER CODE END StartRefreshDisplay */
 }
