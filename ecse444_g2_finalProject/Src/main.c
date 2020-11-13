@@ -23,8 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-float gyroData[3];
-
+#include <stdio.h>
+#include "stm32l475e_iot01_gyro.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -71,12 +71,12 @@ void StartProcessSensor(void const * argument);
 void StartRefreshDisplay(void const * argument);
 
 /* USER CODE BEGIN PFP */
-
+void clearBuf(char *buf, uint8_t len);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+float gyroData[3];
 /* USER CODE END 0 */
 
 /**
@@ -432,7 +432,11 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+void clearBuf(char *buf, uint8_t len)
+{
+	for (int i = 0; i < len; i++)
+		buf[i] = 0;
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartGameLoop */
@@ -483,14 +487,20 @@ void StartProcessSensor(void const * argument)
 void StartRefreshDisplay(void const * argument)
 {
   /* USER CODE BEGIN StartRefreshDisplay */
+  char buffer[50];
+  // Magic string clears the screen
+  HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
   /* Infinite loop */
   for(;;)
   {
-    osDelay(10);
-    char buffer[48];
-	sprintf(buffer, "\nGyroscope: x = %d, y = %d, z = %d /// ", (int)gyroData[0], (int)gyroData[1], (int)gyroData[2]);
-	HAL_UART_Transmit(&huart1, buffer, 48, 10);
-
+    osDelay(40);
+    clearBuf(buffer, 50);
+	sprintf(buffer, "Gyroscope: x = %d, y = %d, z = %d", (int)gyroData[0], (int)gyroData[1], (int)gyroData[2]);
+	// These two magic strings clear the first line and set the cursor back to the top left corner
+	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2K", 7, 100);
+	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[H", 9, 100);
+	// Print the buffer to UART
+	HAL_UART_Transmit(&huart1, (uint8_t *)buffer, 50, 100);
   }
   /* USER CODE END StartRefreshDisplay */
 }
