@@ -34,6 +34,8 @@ float gyroData[3];
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+// size of the window for the signal buffer
+#define BUFFER_LENGTH 100
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -463,12 +465,27 @@ void StartGameLoop(void const * argument)
 void StartProcessSensor(void const * argument)
 {
   /* USER CODE BEGIN StartProcessSensor */
+  // buffer the last BUFFER_LENGTH number of signal values using a circular buffer
+  float signalBuffer[BUFFER_LENGTH];
+  uint8_t signalBufferLength = 0;
+  uint8_t readIndex = 0;
+  uint8_t writeIndex = 0;
+  uint32_t count = 0;
   /* Infinite loop */
   for(;;)
   {
     osDelay(10);
     BSP_GYRO_GetXYZ(gyroData);
-
+    // TODO:
+    // if count > BUFFER_LENGTH
+    	// do actual signal processing
+    // else
+    	// take average
+    if (count > BUFFER_LENGTH) {
+    	// TODO
+    } else {
+    	// TODO
+    }
   }
   /* USER CODE END StartProcessSensor */
 }
