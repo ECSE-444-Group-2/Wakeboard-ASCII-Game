@@ -28,11 +28,38 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+struct {
+	float x;
+	float y;
+} typedef Pos;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define DISPLAY_LENGTH_X	100
+#define DISPLAY_LENGTH_Y	40
+
+// Scale the gyro sensor angle to movement of the character
+#define GYRO_TO_DISP_FACTOR 0.5
+
+// Character is always at the same Y position
+#define CHARACTER_POS_Y		(DISPLAY_LENGTH_Y - 1)
+
+// ASCII symbol for the character
+#define CHARACTER_CHAR			'O'
+
+// The position of the obstacle is determined by an index in the 2D
+// display array. Each object will have a width (and potentially
+// height) associated to them. This parameter specifies how many
+// extra indexes the object takes up on either side. For example,
+// if the obstacle is 5 indexes wide, OBSTACLE_EXTRA_WIDTH will be
+// 2.
+#define OBSTACLE_EXTRA_WIDTH	1
+
+// How many indexes the obstacle will move each game loop. Could
+// become a variable if we want to increase the difficulty?
+#define OBSTACLE_SPEED			0.2
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -54,7 +81,13 @@ osThreadId gameLoopHandle;
 osThreadId processSensorHandle;
 osThreadId refreshDisplayHandle;
 /* USER CODE BEGIN PV */
+// Temporary global variables for development purposes. These will be replaced
+// eventually.
 
+// Current rotated position given by gyroscope
+float gyroRotation;
+// Display array [x,y]
+char display[DISPLAY_LENGTH_X][DISPLAY_LENGTH_Y];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -70,7 +103,7 @@ void StartProcessSensor(void const * argument);
 void StartRefreshDisplay(void const * argument);
 
 /* USER CODE BEGIN PFP */
-
+void gameOver();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -429,7 +462,25 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void gameOver()
+{
+	//TODO: Go to game over screen or something
+}
 
+uint8_t collision(Pos *obstacle, uint8_t newX, int8_t extraWidth)
+{
+	int8_t i;
+
+	// If object is not on the last row, no need to check X dimension
+	if ((uint8_t)obstacle->y == CHARACTER_POS_Y) {
+		// Check if character intercepts with width of obstacle
+		for(i = -extraWidth; i <= extraWidth; i++) {
+			if ((int8_t)obstacle->x + i == newX)
+				return 1;
+		}
+	}
+	return 0;
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartGameLoop */
@@ -442,10 +493,60 @@ static void MX_GPIO_Init(void)
 void StartGameLoop(void const * argument)
 {
   /* USER CODE BEGIN 5 */
+  // Temporarily create variables that will be global at some point
+
+  // Local variables
+  // Array of obstacles and counter for number of obstacles on-screen
+  // Array will be sorted from youngest to oldest obstacle
+  Pos *obstacles[10];
+  uint8_t obstacleCount = 0;
+
+  // Posistion of the character
+  float characterPosX = DISPLAY_LENGTH_X >> 1;
+  // characterPosY is constant, so it's defined as a macro
+
+  // Local copy of gyro sensor data
+  float gyroData;
+
+  // Displacement of character
+  float newX;
+
+  // General purpose index
+  uint8_t i;
+
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+	// Run game loop at 20 Hz
+    osDelay(50);
+
+    //TODO: Generate obstacles at random positions. Must be between
+    //		OBSTACLE_EXTRA_WIDTH and DISPLAY_MAX_X - OBSTACLE_EXTRA_WIDTH
+
+    // Calculate new character position
+    gyroData = gyroRotation;
+    newX += (gyroData * GYRO_TO_DISP_FACTOR);
+    if (newX < 0)
+    	newX = 0;
+    if (newX > DISPLAY_LENGTH_X - 1){
+    	newX = DISPLAY_LENGTH_X - 1;
+    }
+
+    // Calculate new obstacle position and check for collisions
+    for (i = 0; i < obstacleCount; i++){
+    	obstacles[i]->y += OBSTACLE_SPEED;
+    	// Check if obstacle has left the display
+    	if (obstacles[i]->y > 39.9){
+    		obstacleCount--;
+    	}
+    	// Check for collision
+    	else if (collision(obstacles[i], (uint8_t)newX, OBSTACLE_EXTRA_WIDTH)){
+    		gameOver();
+    	}
+    }
+
+    //TODO: Update display
+
   }
   /* USER CODE END 5 */
 }
