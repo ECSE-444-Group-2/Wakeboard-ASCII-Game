@@ -23,8 +23,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-float gyroData[3];
+//#include <stdio.h>
 
+float gyroData[3];
+float angularDisplacement;
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -466,25 +468,26 @@ void StartProcessSensor(void const * argument)
 {
   /* USER CODE BEGIN StartProcessSensor */
   // buffer the last BUFFER_LENGTH number of signal values using a circular buffer
-  float signalBuffer[BUFFER_LENGTH];
-  uint8_t signalBufferLength = 0;
-  uint8_t readIndex = 0;
-  uint8_t writeIndex = 0;
+  //float signalBuffer[BUFFER_LENGTH];
+  //uint8_t signalBufferLength = 0;
+  //uint8_t readIndex = 0;
+  //uint8_t writeIndex = 0;
   uint32_t count = 0;
+  float calibrationAvg = 0;
   /* Infinite loop */
   for(;;)
   {
     osDelay(10);
     BSP_GYRO_GetXYZ(gyroData);
-    // TODO:
-    // if count > BUFFER_LENGTH
-    	// do actual signal processing
-    // else
-    	// take average
     if (count > BUFFER_LENGTH) {
-    	// TODO
+    	// multiply and accumulate, where 0.01 is the time step
+    	// clamp at +- 90 degrees
+    	angularDisplacement += (gyroData[0] - calibrationAvg) * 0.01;
+    	if (angularDisplacement > 90.0) angularDisplacement = 90.0;
+    	else if (angularDisplacement < -90.0) angularDisplacement = -90.0;
     } else {
-    	// TODO
+    	calibrationAvg += (gyroData[0] / BUFFER_LENGTH);
+    	count++;
     }
   }
   /* USER CODE END StartProcessSensor */
@@ -505,7 +508,7 @@ void StartRefreshDisplay(void const * argument)
   {
     osDelay(10);
     char buffer[48];
-	sprintf(buffer, "\nGyroscope: x = %d, y = %d, z = %d /// ", (int)gyroData[0], (int)gyroData[1], (int)gyroData[2]);
+	sprintf(buffer, "\nAngular Displacement: %d", (int)angularDisplacement);
 	HAL_UART_Transmit(&huart1, buffer, 48, 10);
 
   }
