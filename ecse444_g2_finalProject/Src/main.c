@@ -23,18 +23,49 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdlib.h>
 #include "stm32l475e_iot01_gyro.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+struct {
+	float x;
+	float y;
+} typedef Pos;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define DISPLAY_MAX_Y 20
-#define DISPLAY_MAX_X 60
+#define DISPLAY_LENGTH_X 			60
+#define DISPLAY_LENGTH_Y 			20
+
+// Scale the gyro sensor angle to movement of the player
+#define GYRO_TO_DISP_FACTOR 	0.5
+
+// Player is always at the same Y position
+#define PLAYER_Y				(DISPLAY_LENGTH_Y - 1)
+
+// Player cannot go into the last column
+#define PLAYER_MAX_X					DISPLAY_LENGTH_X - 2
+
+// ASCII symbol for the player
+#define PLAYER_CHAR						'^'
+
+// The position of the obstacle is determined by an index in the 2D
+// display array. Each object will have a width (and potentially
+// height) associated to them. This parameter specifies how many
+// extra indexes the object takes up on either side. For example,
+// if the obstacle is 5 indexes wide, OBSTACLE_EXTRA_WIDTH will be
+// 2.
+#define OBSTACLE_EXTRA_WIDTH	5
+
+// How many indexes the obstacle will move each game loop. Could
+// become a variable if we want to increase the difficulty?
+#define OBSTACLE_SPEED				0.5
+
+// ASCII symbol for the obstacles
+#define OBSTACLE_CHAR					'='
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -54,10 +85,23 @@ TIM_HandleTypeDef htim3;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-char display[DISPLAY_MAX_Y][DISPLAY_MAX_X];
+// NOTE: Display is [y][x], NOT [x][y]
+uint8_t display[DISPLAY_LENGTH_Y][DISPLAY_LENGTH_X];
+
+// Gyro stuff
 float gyroData[3];
-uint8_t playerX = 0;
-uint8_t playerY = 0;
+float gyroValue = 0;
+
+// Array of obstacles and counter for number of obstacles on-screen
+// Array will be sorted from youngest to oldest obstacle
+Pos *obstacle;
+
+// Posistion of the player
+float playerX = DISPLAY_LENGTH_X >> 1;
+// characterPosY is constant, so it's defined as a macro
+
+// Player position
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -70,7 +114,9 @@ static void MX_USART1_UART_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
-void clearBuf(char *buf, uint8_t len);
+void gameOver();
+uint8_t collision(Pos *obstacle, int8_t newX, int8_t extraWidth);
+void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -118,20 +164,27 @@ int main(void)
   BSP_GYRO_Init();
   BSP_GYRO_GetXYZ(gyroData);
 
-  // Timers
-  HAL_TIM_Base_Start_IT(&htim3);
-
+  // Set up display
   HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
+  HAL_UART_Transmit(&huart1, (uint8_t *)"\n\n", 4, 100);
   uint8_t i;
   uint8_t j;
-  for(i = 0; i < DISPLAY_MAX_Y; i++){
-		for(j = 0; j < DISPLAY_MAX_X; j++){
-			if (j == DISPLAY_MAX_X - 1)
+  for(i = 0; i < DISPLAY_LENGTH_Y; i++){
+		for(j = 0; j < DISPLAY_LENGTH_X; j++){
+			if (j == DISPLAY_LENGTH_X - 1)
 				display[i][j] = '\n';
 			else
 				display[i][j] = ' ';
 		}
 	}
+
+  // Initialize obstacle
+  obstacle = (Pos *) malloc(sizeof(Pos));
+  obstacle->x = -1.0;
+  obstacle->y = -1.0;
+
+  // Timers
+  HAL_TIM_Base_Start_IT(&htim3);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -458,7 +511,36 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void gameOver()
+{
+	//TODO: Go to game over screen or something
+	HAL_TIM_Base_Stop_IT(&htim3);
+	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
+	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 9, 100);
+	HAL_UART_Transmit(&huart1, (uint8_t *)"You lose :(", 11, 100);
+}
 
+uint8_t collision(Pos *obstacle, int8_t newX, int8_t extraWidth)
+{
+	int8_t i;
+
+	// If object is not on the last row, no need to check X dimension
+	if ((uint8_t)obstacle->y == PLAYER_Y) {
+		// Check if character intercepts with width of obstacle
+		for(i = -extraWidth; i <= extraWidth; i++) {
+			if ((int8_t)obstacle->x + i == newX)
+				return 1;
+		}
+	}
+	return 0;
+}
+
+void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth)
+{
+	int8_t i;
+	for(i = -extraWidth; i <= extraWidth; i++)
+		display[(uint8_t)o->y][(int8_t)o->x + i] = newChar;
+}
 /* USER CODE END 4 */
 
 /**
@@ -473,26 +555,65 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
 	if (htim->Instance == TIM3) {
-		//HAL_TIM_Base_Stop_IT(&htim3);
+		// Local copy of gyro sensor data
+		float gyroData;
+
+		// Erase current player position
+		display[PLAYER_Y][(uint8_t)playerX] = ' ';
+
+		// Calculate new player position
+		gyroData = gyroValue;
+		playerX += (gyroData * GYRO_TO_DISP_FACTOR);
+		if (playerX < 0)
+			playerX = 0;
+		if (playerX > PLAYER_MAX_X + 0.9)
+			playerX = PLAYER_MAX_X;
+
+		// Calculate new obstacle position and check for collisions
+		if (obstacle->x < 0) {
+			obstacle->x = rand() % (PLAYER_MAX_X - OBSTACLE_EXTRA_WIDTH);
+			if (obstacle->x < OBSTACLE_EXTRA_WIDTH)
+				obstacle->x = OBSTACLE_EXTRA_WIDTH;
+			obstacle->y = 0;
+		}
+		else {
+			setObstacle(obstacle, (uint8_t)' ', OBSTACLE_EXTRA_WIDTH);
+			obstacle->y += OBSTACLE_SPEED;
+			// Check if obstacle has left the display
+			if (obstacle->y > DISPLAY_LENGTH_Y - 0.1){
+				obstacle->x = -1.0;
+				obstacle->y = -1.0;
+			}
+			// Check for collision
+			else if (collision(obstacle, (int8_t)playerX, OBSTACLE_EXTRA_WIDTH)){
+				gameOver();
+				return;
+			}
+		}
 		//clearBuf(buffer, 50);
 		//sprintf(buffer, "Gyroscope: x = %d, y = %d, z = %d", (int)gyroData[0], (int)gyroData[1], (int)gyroData[2]);
 		// These two magic strings clear the first line and set the cursor back to the top left corner
 		//HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 7, 100);
-		display[playerY][playerX] = ' ';
-		playerX++;
-		if (playerX == DISPLAY_MAX_X - 1){
-			playerX = 0;
-			playerY++;
-			if (playerY == DISPLAY_MAX_Y)
-				playerY = 0;
-		}
-		display[playerY][playerX] = 'O';
-		HAL_UART_Transmit(&huart1, (uint8_t *)"\033[H", 9, 100);
+//		display[playerY][playerX] = ' ';
+//		playerX++;
+//		if (playerX == DISPLAY_MAX_X - 1){
+//			playerX = 0;
+//			playerY++;
+//			if (playerY == DISPLAY_MAX_Y)
+//				playerY = 0;
+//		}
+		// Move player to new location
+		display[PLAYER_Y][(uint8_t)playerX] = PLAYER_CHAR;
+
+		// Update obstacle location
+		if (obstacle->x > -0.5)
+			setObstacle(obstacle, OBSTACLE_CHAR, OBSTACLE_EXTRA_WIDTH);
+		HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 9, 100);
+
 		// Print the buffer to UART
-		for (uint8_t i = 0; i < DISPLAY_MAX_Y; i++){
-			HAL_UART_Transmit(&huart1, display[i], DISPLAY_MAX_X, 100);
+		for (uint8_t i = 0; i < DISPLAY_LENGTH_Y; i++){
+			HAL_UART_Transmit(&huart1, display[i], DISPLAY_LENGTH_X, 100);
 		}
-		//HAL_TIM_Base_Start_IT(&htim3);
 	}
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM6) {
