@@ -19,7 +19,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -34,6 +33,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define DISPLAY_MAX_Y 20
+#define DISPLAY_MAX_X 60
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -48,14 +49,15 @@ DMA_HandleTypeDef hdma_dac_ch1;
 I2C_HandleTypeDef hi2c2;
 
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 UART_HandleTypeDef huart1;
 
-osThreadId gameLoopHandle;
-osThreadId processSensorHandle;
-osThreadId refreshDisplayHandle;
 /* USER CODE BEGIN PV */
-
+char display[DISPLAY_MAX_Y][DISPLAY_MAX_X];
+float gyroData[3];
+uint8_t playerX = 0;
+uint8_t playerY = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -66,17 +68,14 @@ static void MX_DAC1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_I2C2_Init(void);
-void StartGameLoop(void const * argument);
-void StartProcessSensor(void const * argument);
-void StartRefreshDisplay(void const * argument);
-
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void clearBuf(char *buf, uint8_t len);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-float gyroData[3];
+
 /* USER CODE END 0 */
 
 /**
@@ -112,49 +111,29 @@ int main(void)
   MX_TIM2_Init();
   MX_USART1_UART_Init();
   MX_I2C2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
+  // Initialize peripherals
+  // Gyro sensor
   BSP_GYRO_Init();
-
   BSP_GYRO_GetXYZ(gyroData);
+
+  // Timers
+  HAL_TIM_Base_Start_IT(&htim3);
+
+  HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
+  uint8_t i;
+  uint8_t j;
+  for(i = 0; i < DISPLAY_MAX_Y; i++){
+		for(j = 0; j < DISPLAY_MAX_X; j++){
+			if (j == DISPLAY_MAX_X - 1)
+				display[i][j] = '\n';
+			else
+				display[i][j] = ' ';
+		}
+	}
   /* USER CODE END 2 */
 
-  /* USER CODE BEGIN RTOS_MUTEX */
-  /* add mutexes, ... */
-  /* USER CODE END RTOS_MUTEX */
-
-  /* USER CODE BEGIN RTOS_SEMAPHORES */
-  /* add semaphores, ... */
-  /* USER CODE END RTOS_SEMAPHORES */
-
-  /* USER CODE BEGIN RTOS_TIMERS */
-  /* start timers, add new ones, ... */
-  /* USER CODE END RTOS_TIMERS */
-
-  /* USER CODE BEGIN RTOS_QUEUES */
-  /* add queues, ... */
-  /* USER CODE END RTOS_QUEUES */
-
-  /* Create the thread(s) */
-  /* definition and creation of gameLoop */
-  osThreadDef(gameLoop, StartGameLoop, osPriorityNormal, 0, 128);
-  gameLoopHandle = osThreadCreate(osThread(gameLoop), NULL);
-
-  /* definition and creation of processSensor */
-  osThreadDef(processSensor, StartProcessSensor, osPriorityNormal, 0, 128);
-  processSensorHandle = osThreadCreate(osThread(processSensor), NULL);
-
-  /* definition and creation of refreshDisplay */
-  osThreadDef(refreshDisplay, StartRefreshDisplay, osPriorityNormal, 0, 128);
-  refreshDisplayHandle = osThreadCreate(osThread(refreshDisplay), NULL);
-
-  /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
-  /* USER CODE END RTOS_THREADS */
-
-  /* Start scheduler */
-  osKernelStart();
-
-  /* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -162,6 +141,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+		BSP_GYRO_GetXYZ(gyroData);
+		HAL_Delay(10);
   }
   /* USER CODE END 3 */
 }
@@ -355,6 +336,51 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 40000;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 200;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -432,78 +458,8 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void clearBuf(char *buf, uint8_t len)
-{
-	for (int i = 0; i < len; i++)
-		buf[i] = 0;
-}
+
 /* USER CODE END 4 */
-
-/* USER CODE BEGIN Header_StartGameLoop */
-/**
-  * @brief  Function implementing the gameLoop thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartGameLoop */
-void StartGameLoop(void const * argument)
-{
-  /* USER CODE BEGIN 5 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartProcessSensor */
-/**
-* @brief Function implementing the processSensor thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartProcessSensor */
-void StartProcessSensor(void const * argument)
-{
-  /* USER CODE BEGIN StartProcessSensor */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(10);
-    BSP_GYRO_GetXYZ(gyroData);
-
-  }
-  /* USER CODE END StartProcessSensor */
-}
-
-/* USER CODE BEGIN Header_StartRefreshDisplay */
-/**
-* @brief Function implementing the refreshDisplay thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartRefreshDisplay */
-void StartRefreshDisplay(void const * argument)
-{
-  /* USER CODE BEGIN StartRefreshDisplay */
-  char buffer[50];
-  // Magic string clears the screen
-  HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(40);
-    clearBuf(buffer, 50);
-	sprintf(buffer, "Gyroscope: x = %d, y = %d, z = %d", (int)gyroData[0], (int)gyroData[1], (int)gyroData[2]);
-	// These two magic strings clear the first line and set the cursor back to the top left corner
-	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2K", 7, 100);
-	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[H", 9, 100);
-	// Print the buffer to UART
-	HAL_UART_Transmit(&huart1, (uint8_t *)buffer, 50, 100);
-  }
-  /* USER CODE END StartRefreshDisplay */
-}
 
 /**
   * @brief  Period elapsed callback in non blocking mode
@@ -516,7 +472,28 @@ void StartRefreshDisplay(void const * argument)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
-
+	if (htim->Instance == TIM3) {
+		//HAL_TIM_Base_Stop_IT(&htim3);
+		//clearBuf(buffer, 50);
+		//sprintf(buffer, "Gyroscope: x = %d, y = %d, z = %d", (int)gyroData[0], (int)gyroData[1], (int)gyroData[2]);
+		// These two magic strings clear the first line and set the cursor back to the top left corner
+		//HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 7, 100);
+		display[playerY][playerX] = ' ';
+		playerX++;
+		if (playerX == DISPLAY_MAX_X - 1){
+			playerX = 0;
+			playerY++;
+			if (playerY == DISPLAY_MAX_Y)
+				playerY = 0;
+		}
+		display[playerY][playerX] = 'O';
+		HAL_UART_Transmit(&huart1, (uint8_t *)"\033[H", 9, 100);
+		// Print the buffer to UART
+		for (uint8_t i = 0; i < DISPLAY_MAX_Y; i++){
+			HAL_UART_Transmit(&huart1, display[i], DISPLAY_MAX_X, 100);
+		}
+		//HAL_TIM_Base_Start_IT(&htim3);
+	}
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM6) {
     HAL_IncTick();
