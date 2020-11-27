@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "stm32l475e_iot01_gyro.h"
+#include "stm32l475e_iot01_qspi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,7 +45,7 @@ struct {
 #define GYRO_TO_DISP_FACTOR 	0.5
 
 // Player is always at the same Y position
-#define PLAYER_Y				(DISPLAY_LENGTH_Y - 1)
+#define PLAYER_Y							(DISPLAY_LENGTH_Y - 1)
 
 // Player cannot go into the last column
 #define PLAYER_MAX_X					DISPLAY_LENGTH_X - 2
@@ -66,6 +67,9 @@ struct {
 
 // ASCII symbol for the obstacles
 #define OBSTACLE_CHAR					'='
+
+// ITM Port define
+#define ITM_Port32(n)					(*((volatile unsigned long *) (0xE0000000+4*n)))
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -79,6 +83,8 @@ DMA_HandleTypeDef hdma_dac_ch1;
 
 I2C_HandleTypeDef hi2c2;
 
+QSPI_HandleTypeDef hqspi;
+
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 
@@ -90,7 +96,7 @@ uint8_t display[DISPLAY_LENGTH_Y][DISPLAY_LENGTH_X];
 
 // Gyro stuff
 float gyroData[3];
-float gyroValue = 0;
+float angularDisplacement = 0;
 
 // Array of obstacles and counter for number of obstacles on-screen
 // Array will be sorted from youngest to oldest obstacle
@@ -113,6 +119,7 @@ static void MX_TIM2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_QUADSPI_Init(void);
 /* USER CODE BEGIN PFP */
 void gameOver();
 uint8_t collision(Pos *obstacle, int8_t newX, int8_t extraWidth);
@@ -158,6 +165,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_I2C2_Init();
   MX_TIM3_Init();
+  MX_QUADSPI_Init();
   /* USER CODE BEGIN 2 */
   // Initialize peripherals
   // Gyro sensor
@@ -344,6 +352,39 @@ static void MX_I2C2_Init(void)
 }
 
 /**
+  * @brief QUADSPI Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_QUADSPI_Init(void)
+{
+
+  /* USER CODE BEGIN QUADSPI_Init 0 */
+
+  /* USER CODE END QUADSPI_Init 0 */
+
+  /* USER CODE BEGIN QUADSPI_Init 1 */
+
+  /* USER CODE END QUADSPI_Init 1 */
+  /* QUADSPI parameter configuration*/
+  hqspi.Instance = QUADSPI;
+  hqspi.Init.ClockPrescaler = 255;
+  hqspi.Init.FifoThreshold = 1;
+  hqspi.Init.SampleShifting = QSPI_SAMPLE_SHIFTING_NONE;
+  hqspi.Init.FlashSize = 1;
+  hqspi.Init.ChipSelectHighTime = QSPI_CS_HIGH_TIME_1_CYCLE;
+  hqspi.Init.ClockMode = QSPI_CLOCK_MODE_0;
+  if (HAL_QSPI_Init(&hqspi) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN QUADSPI_Init 2 */
+
+  /* USER CODE END QUADSPI_Init 2 */
+
+}
+
+/**
   * @brief TIM2 Initialization Function
   * @param None
   * @retval None
@@ -496,6 +537,7 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin : BUTTON_Pin */
@@ -555,6 +597,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
 	if (htim->Instance == TIM3) {
+		//ITM_Port32(31) = 1;
 		// Local copy of gyro sensor data
 		float gyroData;
 
@@ -562,7 +605,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		display[PLAYER_Y][(uint8_t)playerX] = ' ';
 
 		// Calculate new player position
-		gyroData = gyroValue;
+		gyroData = angularDisplacement;
 		playerX += (gyroData * GYRO_TO_DISP_FACTOR);
 		if (playerX < 0)
 			playerX = 0;
@@ -614,6 +657,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		for (uint8_t i = 0; i < DISPLAY_LENGTH_Y; i++){
 			HAL_UART_Transmit(&huart1, display[i], DISPLAY_LENGTH_X, 100);
 		}
+		//ITM_Port32(31) = 2;
 	}
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM6) {
