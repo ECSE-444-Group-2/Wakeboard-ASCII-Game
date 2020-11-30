@@ -26,6 +26,8 @@
 #include <stdlib.h>
 #include "stm32l475e_iot01_gyro.h"
 #include "stm32l475e_iot01_qspi.h"
+void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac1);
+#include "arm_math.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -128,7 +130,10 @@ void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+int numOfSamples = 18000;
+uint8_t sineArray[18000];
+int sineWaveNumber = 0;
+int nextFreq = 1; // trigger to go to next frequency
 /* USER CODE END 0 */
 
 /**
@@ -193,6 +198,9 @@ int main(void)
 
   // Timers
   HAL_TIM_Base_Start_IT(&htim3);
+
+  BSP_QSPI_Init();
+  HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -204,6 +212,42 @@ int main(void)
     /* USER CODE BEGIN 3 */
 		BSP_GYRO_GetXYZ(gyroData);
 		HAL_Delay(10);
+
+	  if (nextFreq == 1) {
+		  // stop the DAC
+		  HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
+
+		  // start over from the first frequency if we reached the end (8th frequency)
+		  sineWaveNumber = sineWaveNumber % 8;
+
+		  // Do block erase so that we have space to store data for next frequency
+		  BSP_QSPI_Erase_Block(0);
+
+		  for (int i = 0; i < numOfSamples; i++) {
+			  // divide by different values to get different frequencies
+			  float32_t freq = (float32_t)i / (24.0 - sineWaveNumber * 2);
+			  float32_t sineData = arm_sin_f32(M_PI * freq);
+			  // increase the amplitude of the data
+			  float32_t amplifiedData = (sineData) * 415;
+			  sineArray[i] = (uint8_t) amplifiedData;
+		  }
+
+		  // Writes the data to the QSPI memory
+		  BSP_QSPI_Write(sineArray, (uint32_t)0, (uint32_t)numOfSamples);
+
+		  // Reads the data from the QSPI memory
+		  BSP_QSPI_Read(sineArray, (uint32_t)0, (uint32_t)numOfSamples);
+
+		  // start DAC in DMA mode
+		  // DMA will read our array of sine values and write to the DAC for us
+		  HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, (uint32_t)numOfSamples, DAC_ALIGN_8B_R);
+
+		  // switch to the next frequency the next time we come in
+		  sineWaveNumber++;
+
+		  // reset the trigger
+		  nextFreq = 0;
+	  }
   }
   /* USER CODE END 3 */
 }
@@ -582,6 +626,12 @@ void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth)
 	int8_t i;
 	for(i = -extraWidth; i <= extraWidth; i++)
 		display[(uint8_t)o->y][(int8_t)o->x + i] = newChar;
+}
+
+void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac1)
+{
+	// set this trigger to 1 so we can change the frequency
+	nextFreq = 1;
 }
 /* USER CODE END 4 */
 
