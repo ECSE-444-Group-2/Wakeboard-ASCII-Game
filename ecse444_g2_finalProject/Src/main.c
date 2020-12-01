@@ -178,8 +178,8 @@ int main(void)
   BSP_GYRO_GetXYZ(gyroData);
 
   // Set up display
+  HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
   HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
-  HAL_UART_Transmit(&huart1, (uint8_t *)"\n\n", 4, 100);
   uint8_t i;
   uint8_t j;
   for(i = 0; i < DISPLAY_LENGTH_Y; i++){
@@ -601,8 +601,8 @@ void gameOver()
 {
 	//TODO: Go to game over screen or something
 	HAL_TIM_Base_Stop_IT(&htim3);
+	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
 	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
-	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 9, 100);
 	HAL_UART_Transmit(&huart1, (uint8_t *)"You lose :(", 11, 100);
 }
 
@@ -647,6 +647,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
 	if (htim->Instance == TIM3) {
+		HAL_TIM_Base_Stop_IT(&htim3);
 		//ITM_Port32(31) = 1;
 		// Local copy of gyro sensor data
 		float gyroData;
@@ -680,6 +681,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			// Check for collision
 			else if (collision(obstacle, (int8_t)playerX, OBSTACLE_EXTRA_WIDTH)){
 				gameOver();
+				HAL_TIM_Base_Start_IT(&htim3);
 				return;
 			}
 		}
@@ -701,12 +703,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		// Update obstacle location
 		if (obstacle->x > -0.5)
 			setObstacle(obstacle, OBSTACLE_CHAR, OBSTACLE_EXTRA_WIDTH);
-		HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 9, 100);
+		HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
 
 		// Print the buffer to UART
 		for (uint8_t i = 0; i < DISPLAY_LENGTH_Y; i++){
 			HAL_UART_Transmit(&huart1, display[i], DISPLAY_LENGTH_X, 100);
 		}
+		HAL_TIM_Base_Start_IT(&htim3);
 		//ITM_Port32(31) = 2;
 	}
   /* USER CODE END Callback 0 */
