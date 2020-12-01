@@ -228,16 +228,11 @@ int main(void)
 	  // if leaky integrator signal is freshly initialized, begin
 	  // otherwise, continue
 	  BSP_GYRO_GetXYZ(gyroData);
-	  if (!leakyGyroFlag) {
-		  leakyGyro = gyroData[0];
-		  leakyGyroFlag = 1;
-	  } else {
-		  leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[0]);
-	  }
+
 
 	  // complete calibration period
 	  if (calibrationCount < CALIBRATION_CYCLES) {
-		  calibrationAvg += leakyGyro / CALIBRATION_CYCLES;
+		  calibrationAvg += gyroData[0] / CALIBRATION_CYCLES;
 		  calibrationCount++;
 	  }
 	  HAL_Delay(10);
@@ -679,6 +674,18 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		//ITM_Port32(31) = 1;
 		// Local copy of gyro sensor data
 		//float gyroData;
+		// it doesn't seem to like handing control back to main, so just poll here
+		BSP_GYRO_GetXYZ(gyroData);
+
+		// begin leaky integrator after calibration period
+		if (!leakyGyroFlag) {
+			leakyGyro = calibrationAvg;
+			leakyGyroFlag = 1;
+		} else {
+			leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[0]);
+		}
+		//leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[0]);
+
 		angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
 		if (angularDisplacement > 90.0) {
 			angularDisplacement = 90.0;
