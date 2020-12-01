@@ -43,7 +43,7 @@ struct {
 #define DISPLAY_LENGTH_Y 			20
 
 // Scale the gyro sensor angle to movement of the player
-#define GYRO_TO_DISP_FACTOR 	0.5
+#define GYRO_TO_DISP_FACTOR 	0.01
 
 // Player is always at the same Y position
 #define PLAYER_Y							(DISPLAY_LENGTH_Y - 1)
@@ -64,7 +64,9 @@ struct {
 
 // How many indexes the obstacle will move each game loop. Could
 // become a variable if we want to increase the difficulty?
-#define OBSTACLE_SPEED				0.5
+//#define OBSTACLE_SPEED_LOW		0.5
+//#define OBSTACLE_SPEED_HIGH		1.0
+#define OBSTACLE_SPEED					0.5
 
 // ASCII symbol for the obstacles
 #define OBSTACLE_CHAR					'='
@@ -84,6 +86,13 @@ struct {
 
 #define GAME_OVER_LEN					8
 #define SUCCESS_LEN						2
+
+#define LEAKY_LAMBDA					0.95
+#define LEAKY_LAMBDA_COMP			0.05
+
+#define CALIBRATION_CYCLES		200
+
+#define GAME_LOOP_PERIOD			0.1
 
 // ITM Port define
 #define ITM_Port32(n)					(*((volatile unsigned long *) (0xE0000000+4*n)))
@@ -113,7 +122,11 @@ uint8_t display[DISPLAY_LENGTH_Y][DISPLAY_LENGTH_X];
 
 // Gyro stuff
 float gyroData[3];
+uint8_t leakyGyroFlag = 0;
+float leakyGyro = 0.0;
 float angularDisplacement = 0;
+uint8_t calibrationCount = 0;
+float calibrationAvg = 0.0;
 
 // Array of obstacles and counter for number of obstacles on-screen
 // Array will be sorted from youngest to oldest obstacle
@@ -288,8 +301,28 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 		BSP_GYRO_GetXYZ(gyroData);
+		if (calibrationCount < CALIBRATION_CYCLES){
+			calibrationAvg += gyroData[2] / CALIBRATION_CYCLES;
+			calibrationCount++;
+		}
+		// begin leaky integrator after calibration period
+		if (!leakyGyroFlag) {
+			leakyGyro = calibrationAvg;
+			leakyGyroFlag = 1;
+		} else {
+			leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[2]);
+		}
+
+		// update and clamp angular displacement
+		// we don't want it to shoot off to arithmetic overflow
+		angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
+		if (angularDisplacement > 90.0) {
+			angularDisplacement = 90.0;
+		} else if (angularDisplacement < -90.0) {
+			angularDisplacement = -90.0;
+		}
 		HAL_Delay(10);
-#ifdef TACOS
+#ifdef NOTNOW
 	  if (nextFreq == 1) {
 		  // stop the DAC
 		  HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
@@ -584,7 +617,7 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
   {
@@ -696,7 +729,6 @@ void clearedObstacle() {
 
 void gameOver()
 {
-	//TODO: Go to game over screen or something
 	HAL_TIM_Base_Stop_IT(&htim3);
 	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
 	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
@@ -761,11 +793,32 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
-	if (htim->Instance == TIM3) {
+	if (htim->Instance == TIM3 && calibrationCount >= CALIBRATION_CYCLES) {
 		HAL_TIM_Base_Stop_IT(&htim3);
+		// it doesn't seem to like handing control back to main, so just poll here
+//		BSP_GYRO_GetXYZ(gyroData);
+//
+//		// begin leaky integrator after calibration period
+//		if (!leakyGyroFlag) {
+//			leakyGyro = calibrationAvg;
+//			leakyGyroFlag = 1;
+//		} else {
+//			leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[0]);
+//		}
+//
+//		// update and clamp angular displacement
+//		// we don't want it to shoot off to arithmetic overflow
+//		angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
+//		if (angularDisplacement > 90.0) {
+//			angularDisplacement = 90.0;
+//		} else if (angularDisplacement < -90.0) {
+//			angularDisplacement = -90.0;
+//		}
 		//ITM_Port32(31) = 1;
 		// Local copy of gyro sensor data
 		float gyroData;
+
+		if ()
 
 		// Erase current player position
 		display[PLAYER_Y][(uint8_t)playerX] = ' ';
@@ -787,6 +840,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		}
 		else {
 			setObstacle(obstacle, (uint8_t)' ', OBSTACLE_EXTRA_WIDTH);
+//			obstacle->y += obstacleSpeed;
 			obstacle->y += OBSTACLE_SPEED;
 			// Check if obstacle has left the display
 			if (obstacle->y > DISPLAY_LENGTH_Y - 0.1){
