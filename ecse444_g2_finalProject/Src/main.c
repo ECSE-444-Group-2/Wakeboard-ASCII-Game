@@ -26,7 +26,6 @@
 #include <stdlib.h>
 #include "stm32l475e_iot01_gyro.h"
 #include "stm32l475e_iot01_qspi.h"
-void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac1);
 #include "arm_math.h"
 /* USER CODE END Includes */
 
@@ -70,6 +69,22 @@ struct {
 // ASCII symbol for the obstacles
 #define OBSTACLE_CHAR					'='
 
+// 20 kHz sampling frequency
+#define SAMP_FREQ							20000
+
+// Size of tone buffer
+#define TONE_BUF_LEN					(uint32_t)10000
+
+// Notes
+#define G_SIX_FREQ						1567.98
+#define A_FLAT_SIX_FREQ				1661.22
+#define A_SIX_FREQ						1760.00
+#define B_FLAT_SIX_FREQ				1864.66
+#define B_SIX_FREQ						1975.53
+
+#define GAME_OVER_LEN					8
+#define SUCCESS_LEN						2
+
 // ITM Port define
 #define ITM_Port32(n)					(*((volatile unsigned long *) (0xE0000000+4*n)))
 /* USER CODE END PD */
@@ -108,7 +123,13 @@ Pos *obstacle;
 float playerX = DISPLAY_LENGTH_X >> 1;
 // characterPosY is constant, so it's defined as a macro
 
-// Player position
+uint32_t blockSize;
+uint8_t gameOverTone;
+uint8_t successTone;
+
+uint8_t gameOverTones[GAME_OVER_LEN] = {2,4,2,1,3,1,0,0};
+uint8_t successTones[SUCCESS_LEN] = {0,4};
+uint8_t isSuccess;
 
 /* USER CODE END PV */
 
@@ -123,6 +144,8 @@ static void MX_I2C2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_QUADSPI_Init(void);
 /* USER CODE BEGIN PFP */
+//void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac1);
+void createTone(uint8_t *arr, float32_t freq);
 void gameOver();
 uint8_t collision(Pos *obstacle, int8_t newX, int8_t extraWidth);
 void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth);
@@ -130,8 +153,8 @@ void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int numOfSamples = 18000;
-uint8_t sineArray[18000];
+int numOfSamples = 10000;
+uint8_t sineArray[10000];
 int sineWaveNumber = 0;
 int nextFreq = 1; // trigger to go to next frequency
 /* USER CODE END 0 */
@@ -196,10 +219,64 @@ int main(void)
   obstacle->x = -1.0;
   obstacle->y = -1.0;
 
+  // Load sound files to flash
+
+  // Initialize QSPI
+  if (BSP_QSPI_Init()){
+  	Error_Handler();
+  }
+  // Set the block size
+	QSPI_Info *pInfo = (QSPI_Info *)malloc(sizeof(QSPI_Info));
+	BSP_QSPI_GetInfo(pInfo);
+	blockSize = pInfo->EraseSectorSize * 16;
+
+	// Erase 5 blocks for sounds
+//	BSP_QSPI_Erase_Chip();
+	for (int i = 0; i < 2; i++)
+		if (BSP_QSPI_Erase_Block(i) != QSPI_OK)
+			Error_Handler();
+
+	// Store all the tones in Flash
+	uint32_t currAddr = 0;
+
+	createTone(sineArray, G_SIX_FREQ);
+	if (BSP_QSPI_Write(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
+		Error_Handler();
+//	if (BSP_QSPI_Read(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
+//		Error_Handler();
+	currAddr += TONE_BUF_LEN;
+
+	createTone(sineArray, A_FLAT_SIX_FREQ);
+	if (BSP_QSPI_Write(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
+			Error_Handler();
+	if (BSP_QSPI_Read(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
+			Error_Handler();
+	currAddr += TONE_BUF_LEN;
+
+	createTone(sineArray, A_SIX_FREQ);
+	if (BSP_QSPI_Write(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
+			Error_Handler();
+	currAddr += TONE_BUF_LEN;
+
+	createTone(sineArray, B_FLAT_SIX_FREQ);
+	if (BSP_QSPI_Write(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
+			Error_Handler();
+	currAddr += TONE_BUF_LEN;
+
+	createTone(sineArray, B_SIX_FREQ);
+	if (BSP_QSPI_Write(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
+			Error_Handler();
+
+	// Load in first tone
+	gameOverTone = 0;
+//	if (BSP_QSPI_Read(sineArray, (uint32_t)(toneSequence[currTone]) * blockSize, TONE_BUF_LEN) != QSPI_OK)
+	if (BSP_QSPI_Read(sineArray, gameOverTones[gameOverTone] * TONE_BUF_LEN, TONE_BUF_LEN) != QSPI_OK)
+		Error_Handler();
+//	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
+
   // Timers
   HAL_TIM_Base_Start_IT(&htim3);
 
-  BSP_QSPI_Init();
   HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END 2 */
 
@@ -212,7 +289,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
 		BSP_GYRO_GetXYZ(gyroData);
 		HAL_Delay(10);
-
+#ifdef TACOS
 	  if (nextFreq == 1) {
 		  // stop the DAC
 		  HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
@@ -248,6 +325,7 @@ int main(void)
 		  // reset the trigger
 		  nextFreq = 0;
 	  }
+#endif
   }
   /* USER CODE END 3 */
 }
@@ -597,6 +675,25 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void createTone(uint8_t *arr, float32_t freq)
+{
+	float32_t smplsPerT, fValue, sinIndex;
+
+	smplsPerT = SAMP_FREQ / freq;
+
+	for (int i = 0; i < TONE_BUF_LEN; i++){
+		sinIndex = (i / smplsPerT) * 2 * M_PI;
+		fValue = arm_sin_f32(sinIndex);
+		arr[i] = (uint8_t)((fValue * 85) + 85);
+	}
+}
+
+void clearedObstacle() {
+	if (BSP_QSPI_Read(sineArray, 0, TONE_BUF_LEN) != QSPI_OK)
+		Error_Handler();
+	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
+}
+
 void gameOver()
 {
 	//TODO: Go to game over screen or something
@@ -604,6 +701,9 @@ void gameOver()
 	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
 	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
 	HAL_UART_Transmit(&huart1, (uint8_t *)"You lose :(", 11, 100);
+	if (BSP_QSPI_Read(sineArray, (uint32_t)(gameOverTones[gameOverTone]) * TONE_BUF_LEN, TONE_BUF_LEN) != QSPI_OK)
+		Error_Handler();
+	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
 }
 
 uint8_t collision(Pos *obstacle, int8_t newX, int8_t extraWidth)
@@ -628,10 +728,25 @@ void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth)
 		display[(uint8_t)o->y][(int8_t)o->x + i] = newChar;
 }
 
-void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac1)
+void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac)
 {
-	// set this trigger to 1 so we can change the frequency
-	nextFreq = 1;
+	if (hdac == &hdac1){
+		HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
+		if (isSuccess){
+			isSuccess = 0;
+		}
+		else{
+			gameOverTone++;
+			if (gameOverTone < GAME_OVER_LEN){
+				if (BSP_QSPI_Read(sineArray, (uint32_t)(gameOverTones[gameOverTone]) * TONE_BUF_LEN, TONE_BUF_LEN) != QSPI_OK)
+					Error_Handler();
+				HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
+			}
+			else {
+				gameOverTone = 0;
+			}
+		}
+	}
 }
 /* USER CODE END 4 */
 
@@ -677,11 +792,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			if (obstacle->y > DISPLAY_LENGTH_Y - 0.1){
 				obstacle->x = -1.0;
 				obstacle->y = -1.0;
+				isSuccess = 1;
+				clearedObstacle();
 			}
 			// Check for collision
 			else if (collision(obstacle, (int8_t)playerX, OBSTACLE_EXTRA_WIDTH)){
+				isSuccess = 0;
 				gameOver();
-				HAL_TIM_Base_Start_IT(&htim3);
 				return;
 			}
 		}
@@ -729,7 +846,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-
+	__BKPT();
   /* USER CODE END Error_Handler_Debug */
 }
 
