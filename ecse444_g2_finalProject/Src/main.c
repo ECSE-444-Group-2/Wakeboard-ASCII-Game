@@ -46,6 +46,16 @@ struct {
 // Scale the gyro sensor angle to movement of the player
 #define GYRO_TO_DISP_FACTOR 	0.5
 
+// Smooth gyro signal with leaky integrator
+#define LEAKY_LAMBDA 0.95
+#define LEAKY_LAMBDA_COMP 0.05
+
+// Take a number of cycles to calibrate the gyro sensor
+#define CALIBRATION_CYCLES 100
+
+// Run the game loop (including DSP) at a certain rate (in seconds)
+#define GAME_LOOP_PERIOD 0.1
+
 // Player is always at the same Y position
 #define PLAYER_Y							(DISPLAY_LENGTH_Y - 1)
 
@@ -98,7 +108,11 @@ uint8_t display[DISPLAY_LENGTH_Y][DISPLAY_LENGTH_X];
 
 // Gyro stuff
 float gyroData[3];
+uint8_t leakyGyroFlag = 0;
+float leakyGyro = 0.0;
 float angularDisplacement = 0;
+uint8_t calibrationCount = 0;
+float calibrationAvg = 0.0;
 
 // Array of obstacles and counter for number of obstacles on-screen
 // Array will be sorted from youngest to oldest obstacle
@@ -210,8 +224,23 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-		BSP_GYRO_GetXYZ(gyroData);
-		HAL_Delay(10);
+	  // fetch gyro data
+	  // if leaky integrator signal is freshly initialized, begin
+	  // otherwise, continue
+	  BSP_GYRO_GetXYZ(gyroData);
+	  if (!leakyGyroFlag) {
+		  leakyGyro = gyroData[0];
+		  leakyGyroFlag = 1;
+	  } else {
+		  leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[0]);
+	  }
+
+	  // complete calibration period
+	  if (calibrationCount < CALIBRATION_CYCLES) {
+		  calibrationAvg += leakyGyro / CALIBRATION_CYCLES;
+		  calibrationCount++;
+	  }
+	  HAL_Delay(10);
 
 	  if (nextFreq == 1) {
 		  // stop the DAC
@@ -646,17 +675,23 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac1)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
-	if (htim->Instance == TIM3) {
+	if (htim->Instance == TIM3 && calibrationCount >= CALIBRATION_CYCLES) {
 		//ITM_Port32(31) = 1;
 		// Local copy of gyro sensor data
-		float gyroData;
+		//float gyroData;
+		angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
+		if (angularDisplacement > 90.0) {
+			angularDisplacement = 90.0;
+		} else if (angularDisplacement < -90.0) {
+			angularDisplacement = -90.0;
+		}
 
 		// Erase current player position
 		display[PLAYER_Y][(uint8_t)playerX] = ' ';
 
 		// Calculate new player position
-		gyroData = angularDisplacement;
-		playerX += (gyroData * GYRO_TO_DISP_FACTOR);
+		//gyroData = angularDisplacement;
+		playerX += (angularDisplacement * GYRO_TO_DISP_FACTOR);
 		if (playerX < 0)
 			playerX = 0;
 		if (playerX > PLAYER_MAX_X + 0.9)
