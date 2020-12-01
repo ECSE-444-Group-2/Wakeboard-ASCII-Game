@@ -51,7 +51,7 @@ struct {
 #define LEAKY_LAMBDA_COMP 0.05
 
 // Take a number of cycles to calibrate the gyro sensor
-#define CALIBRATION_CYCLES 100
+#define CALIBRATION_CYCLES 200
 
 // Run the game loop (including DSP) at a certain rate (in seconds)
 #define GAME_LOOP_PERIOD 0.1
@@ -672,8 +672,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   /* USER CODE BEGIN Callback 0 */
 	if (htim->Instance == TIM3 && calibrationCount >= CALIBRATION_CYCLES) {
 		//ITM_Port32(31) = 1;
-		// Local copy of gyro sensor data
-		//float gyroData;
+
 		// it doesn't seem to like handing control back to main, so just poll here
 		BSP_GYRO_GetXYZ(gyroData);
 
@@ -684,8 +683,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		} else {
 			leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[0]);
 		}
-		//leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[0]);
 
+		// update and clamp angular displacement
+		// we don't want it to shoot off to arithmetic overflow
 		angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
 		if (angularDisplacement > 90.0) {
 			angularDisplacement = 90.0;
