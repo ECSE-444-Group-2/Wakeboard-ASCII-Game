@@ -64,9 +64,9 @@ struct {
 
 // How many indexes the obstacle will move each game loop. Could
 // become a variable if we want to increase the difficulty?
-//#define OBSTACLE_SPEED_LOW		0.5
-//#define OBSTACLE_SPEED_HIGH		1.0
-#define OBSTACLE_SPEED					0.5
+#define OBSTACLE_SPEED_LOW		0.5
+#define OBSTACLE_SPEED_HIGH		1.0
+//#define OBSTACLE_SPEED					0.5
 
 // ASCII symbol for the obstacles
 #define OBSTACLE_CHAR					'='
@@ -131,6 +131,7 @@ float calibrationAvg = 0.0;
 // Array of obstacles and counter for number of obstacles on-screen
 // Array will be sorted from youngest to oldest obstacle
 Pos *obstacle;
+float obstacleSpeed = OBSTACLE_SPEED_LOW;
 
 // Posistion of the player
 float playerX = DISPLAY_LENGTH_X >> 1;
@@ -818,7 +819,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		// Local copy of gyro sensor data
 		float gyroData;
 
-		if ()
+		if (!HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin)){
+			if (obstacleSpeed == OBSTACLE_SPEED_LOW)
+				obstacleSpeed = OBSTACLE_SPEED_HIGH;
+			else
+				obstacleSpeed = OBSTACLE_SPEED_LOW;
+		}
 
 		// Erase current player position
 		display[PLAYER_Y][(uint8_t)playerX] = ' ';
@@ -840,8 +846,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		}
 		else {
 			setObstacle(obstacle, (uint8_t)' ', OBSTACLE_EXTRA_WIDTH);
-//			obstacle->y += obstacleSpeed;
-			obstacle->y += OBSTACLE_SPEED;
+			obstacle->y += obstacleSpeed;
+//			obstacle->y += OBSTACLE_SPEED;
 			// Check if obstacle has left the display
 			if (obstacle->y > DISPLAY_LENGTH_Y - 0.1){
 				obstacle->x = -1.0;
