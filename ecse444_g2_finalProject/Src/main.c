@@ -303,24 +303,26 @@ int main(void)
     /* USER CODE BEGIN 3 */
 		BSP_GYRO_GetXYZ(gyroData);
 		if (calibrationCount < CALIBRATION_CYCLES){
-			calibrationAvg += gyroData[2] / CALIBRATION_CYCLES;
+			calibrationAvg += gyroData[1] / CALIBRATION_CYCLES;
 			calibrationCount++;
 		}
-		// begin leaky integrator after calibration period
-		if (!leakyGyroFlag) {
-			leakyGyro = calibrationAvg;
-			leakyGyroFlag = 1;
-		} else {
-			leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[2]);
-		}
+		else {
+			// begin leaky integrator after calibration period
+			if (!leakyGyroFlag) {
+				leakyGyro = calibrationAvg;
+				leakyGyroFlag = 1;
+			} else {
+				leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[1]);
+			}
 
-		// update and clamp angular displacement
-		// we don't want it to shoot off to arithmetic overflow
-		angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
-		if (angularDisplacement > 90.0) {
-			angularDisplacement = 90.0;
-		} else if (angularDisplacement < -90.0) {
-			angularDisplacement = -90.0;
+			// update and clamp angular displacement
+			// we don't want it to shoot off to arithmetic overflow
+			angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
+			if (angularDisplacement > 90.0) {
+				angularDisplacement = 90.0;
+			} else if (angularDisplacement < -90.0) {
+				angularDisplacement = -90.0;
+			}
 		}
 		HAL_Delay(10);
 #ifdef NOTNOW
@@ -815,7 +817,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 //		} else if (angularDisplacement < -90.0) {
 //			angularDisplacement = -90.0;
 //		}
-		//ITM_Port32(31) = 1;
+//		ITM_Port32(31) = 1;
 		// Local copy of gyro sensor data
 //		float gyroData;
 
@@ -848,7 +850,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			setObstacle(obstacle, (uint8_t)' ', OBSTACLE_EXTRA_WIDTH);
 			obstacle->y += obstacleSpeed;
 //			obstacle->y += OBSTACLE_SPEED;
-			// Check if obstacle has left the display
+			// Check if obstacle has left the playing field
 			if (obstacle->y > DISPLAY_LENGTH_Y - 0.1){
 				obstacle->x = -1.0;
 				obstacle->y = -1.0;
@@ -880,14 +882,15 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		// Update obstacle location
 		if (obstacle->x > -0.5)
 			setObstacle(obstacle, OBSTACLE_CHAR, OBSTACLE_EXTRA_WIDTH);
+//		ITM_Port32(31) = 2;
 		HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
 
 		// Print the buffer to UART
 		for (uint8_t i = 0; i < DISPLAY_LENGTH_Y; i++){
 			HAL_UART_Transmit(&huart1, display[i], DISPLAY_LENGTH_X, 100);
 		}
+//		ITM_Port32(31) = 3;
 		HAL_TIM_Base_Start_IT(&htim3);
-		//ITM_Port32(31) = 2;
 	}
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM6) {
