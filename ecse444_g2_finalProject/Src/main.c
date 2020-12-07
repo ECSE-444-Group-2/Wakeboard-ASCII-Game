@@ -817,7 +817,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 //		}
 		//ITM_Port32(31) = 1;
 		// Local copy of gyro sensor data
-		float gyroData;
+//		float gyroData;
 
 		if (!HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin)){
 			if (obstacleSpeed == OBSTACLE_SPEED_LOW)
@@ -830,8 +830,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		display[PLAYER_Y][(uint8_t)playerX] = ' ';
 
 		// Calculate new player position
-		gyroData = angularDisplacement;
-		playerX += (gyroData * GYRO_TO_DISP_FACTOR);
+//		gyroData = angularDisplacement;
+		playerX += (angularDisplacement * GYRO_TO_DISP_FACTOR);
 		if (playerX < 0)
 			playerX = 0;
 		if (playerX > PLAYER_MAX_X + 0.9)
