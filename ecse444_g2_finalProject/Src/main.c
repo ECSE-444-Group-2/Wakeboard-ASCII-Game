@@ -163,6 +163,7 @@ void createTone(uint8_t *arr, float32_t freq);
 void gameOver();
 uint8_t collision(Pos *obstacle, int8_t newX, int8_t extraWidth);
 void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth);
+void clearedObstacle();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -301,67 +302,89 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-		BSP_GYRO_GetXYZ(gyroData);
-		if (calibrationCount < CALIBRATION_CYCLES){
-			calibrationAvg += gyroData[1] / CALIBRATION_CYCLES;
-			calibrationCount++;
-		}
-		else {
-			// begin leaky integrator after calibration period
-			if (!leakyGyroFlag) {
-				leakyGyro = calibrationAvg;
-				leakyGyroFlag = 1;
-			} else {
-				leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[1]);
+//		BSP_GYRO_GetXYZ(gyroData);
+//		if (calibrationCount < CALIBRATION_CYCLES){
+//			calibrationAvg += gyroData[1] / CALIBRATION_CYCLES;
+//			calibrationCount++;
+//		}
+//		else {
+//			// begin leaky integrator after calibration period
+//			if (!leakyGyroFlag) {
+//				leakyGyro = calibrationAvg;
+//				leakyGyroFlag = 1;
+//			} else {
+//				leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[1]);
+//			}
+//
+//			// update and clamp angular displacement
+//			// we don't want it to shoot off to arithmetic overflow
+//			angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
+//			if (angularDisplacement > 90.0) {
+//				angularDisplacement = 90.0;
+//			} else if (angularDisplacement < -90.0) {
+//				angularDisplacement = -90.0;
+//			}
+//		}
+  	if (calibrationCount >= CALIBRATION_CYCLES){
+  		if (!HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin)){
+				if (obstacleSpeed == OBSTACLE_SPEED_LOW)
+					obstacleSpeed = OBSTACLE_SPEED_HIGH;
+				else
+					obstacleSpeed = OBSTACLE_SPEED_LOW;
 			}
 
-			// update and clamp angular displacement
-			// we don't want it to shoot off to arithmetic overflow
-			angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
-			if (angularDisplacement > 90.0) {
-				angularDisplacement = 90.0;
-			} else if (angularDisplacement < -90.0) {
-				angularDisplacement = -90.0;
+			// Erase current player position
+			display[PLAYER_Y][(uint8_t)playerX] = ' ';
+
+			// Calculate new player position
+	//		gyroData = angularDisplacement;
+			playerX += (angularDisplacement * GYRO_TO_DISP_FACTOR);
+			if (playerX < 0)
+				playerX = 0;
+			if (playerX > PLAYER_MAX_X + 0.9)
+				playerX = PLAYER_MAX_X;
+
+			// Calculate new obstacle position and check for collisions
+			if (obstacle->x < 0) {
+				obstacle->x = rand() % (PLAYER_MAX_X - OBSTACLE_EXTRA_WIDTH);
+				if (obstacle->x < OBSTACLE_EXTRA_WIDTH)
+					obstacle->x = OBSTACLE_EXTRA_WIDTH;
+				obstacle->y = 0;
 			}
-		}
-		HAL_Delay(10);
-#ifdef NOTNOW
-	  if (nextFreq == 1) {
-		  // stop the DAC
-		  HAL_DAC_Stop_DMA(&hdac1, DAC_CHANNEL_1);
+			else {
+				setObstacle(obstacle, (uint8_t)' ', OBSTACLE_EXTRA_WIDTH);
+				obstacle->y += obstacleSpeed;
+	//			obstacle->y += OBSTACLE_SPEED;
+				// Check if obstacle has left the playing field
+				if (obstacle->y > DISPLAY_LENGTH_Y - 0.1){
+					obstacle->x = -1.0;
+					obstacle->y = -1.0;
+					isSuccess = 1;
+					clearedObstacle();
+				}
+				// Check for collision
+				else if (collision(obstacle, (int8_t)playerX, OBSTACLE_EXTRA_WIDTH)){
+					isSuccess = 0;
+					gameOver();
+				}
+			}
 
-		  // start over from the first frequency if we reached the end (8th frequency)
-		  sineWaveNumber = sineWaveNumber % 8;
+			// Move player to new location
+			display[PLAYER_Y][(uint8_t)playerX] = PLAYER_CHAR;
 
-		  // Do block erase so that we have space to store data for next frequency
-		  BSP_QSPI_Erase_Block(0);
+			// Update obstacle location
+			if (obstacle->x > -0.5)
+				setObstacle(obstacle, OBSTACLE_CHAR, OBSTACLE_EXTRA_WIDTH);
+	//		ITM_Port32(31) = 2;
+			HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
 
-		  for (int i = 0; i < numOfSamples; i++) {
-			  // divide by different values to get different frequencies
-			  float32_t freq = (float32_t)i / (24.0 - sineWaveNumber * 2);
-			  float32_t sineData = arm_sin_f32(M_PI * freq);
-			  // increase the amplitude of the data
-			  float32_t amplifiedData = (sineData) * 415;
-			  sineArray[i] = (uint8_t) amplifiedData;
-		  }
+			// Print the buffer to UART
+			for (uint8_t i = 0; i < DISPLAY_LENGTH_Y; i++){
+				HAL_UART_Transmit(&huart1, display[i], DISPLAY_LENGTH_X, 100);
+			}
+  	}
 
-		  // Writes the data to the QSPI memory
-		  BSP_QSPI_Write(sineArray, (uint32_t)0, (uint32_t)numOfSamples);
-
-		  // Reads the data from the QSPI memory
-		  BSP_QSPI_Read(sineArray, (uint32_t)0, (uint32_t)numOfSamples);
-
-		  // start DAC in DMA mode
-		  // DMA will read our array of sine values and write to the DAC for us
-		  HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, (uint32_t)numOfSamples, DAC_ALIGN_8B_R);
-
-		  // switch to the next frequency the next time we come in
-		  sineWaveNumber++;
-
-		  // reset the trigger
-		  nextFreq = 0;
-	  }
-#endif
+//		HAL_Delay(10);
   }
   /* USER CODE END 3 */
 }
@@ -606,7 +629,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 40000;
+  htim3.Init.Prescaler = 4000;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 200;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -620,7 +643,7 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
   {
@@ -727,7 +750,7 @@ void createTone(uint8_t *arr, float32_t freq)
 void clearedObstacle() {
 	if (BSP_QSPI_Read(sineArray, 0, TONE_BUF_LEN) != QSPI_OK)
 		Error_Handler();
-	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
+	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN >> 1, DAC_ALIGN_8B_R);
 }
 
 void gameOver()
@@ -739,6 +762,7 @@ void gameOver()
 	if (BSP_QSPI_Read(sineArray, (uint32_t)(gameOverTones[gameOverTone]) * TONE_BUF_LEN, TONE_BUF_LEN) != QSPI_OK)
 		Error_Handler();
 	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
+	while(1);
 }
 
 uint8_t collision(Pos *obstacle, int8_t newX, int8_t extraWidth)
@@ -766,18 +790,24 @@ void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth)
 void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac)
 {
 	if (hdac == &hdac1){
-		HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
+//		HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
 		if (isSuccess){
+			HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
 			isSuccess = 0;
 		}
 		else{
 			gameOverTone++;
-			if (gameOverTone < GAME_OVER_LEN){
+			if (gameOverTone < GAME_OVER_LEN - 1){
+				HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
 				if (BSP_QSPI_Read(sineArray, (uint32_t)(gameOverTones[gameOverTone]) * TONE_BUF_LEN, TONE_BUF_LEN) != QSPI_OK)
 					Error_Handler();
 				HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
 			}
+			else if (gameOverTone == GAME_OVER_LEN - 1){
+				HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
+			}
 			else {
+				HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
 				gameOverTone = 0;
 			}
 		}
@@ -796,101 +826,92 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
-	if (htim->Instance == TIM3 && calibrationCount >= CALIBRATION_CYCLES) {
-		HAL_TIM_Base_Stop_IT(&htim3);
+	if (htim->Instance == TIM3) {
+//		HAL_TIM_Base_Stop_IT(&htim3);
 		// it doesn't seem to like handing control back to main, so just poll here
-//		BSP_GYRO_GetXYZ(gyroData);
-//
-//		// begin leaky integrator after calibration period
-//		if (!leakyGyroFlag) {
-//			leakyGyro = calibrationAvg;
-//			leakyGyroFlag = 1;
-//		} else {
-//			leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[0]);
-//		}
-//
-//		// update and clamp angular displacement
-//		// we don't want it to shoot off to arithmetic overflow
-//		angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
-//		if (angularDisplacement > 90.0) {
-//			angularDisplacement = 90.0;
-//		} else if (angularDisplacement < -90.0) {
-//			angularDisplacement = -90.0;
-//		}
-//		ITM_Port32(31) = 1;
-		// Local copy of gyro sensor data
-//		float gyroData;
-
-		if (!HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin)){
-			if (obstacleSpeed == OBSTACLE_SPEED_LOW)
-				obstacleSpeed = OBSTACLE_SPEED_HIGH;
-			else
-				obstacleSpeed = OBSTACLE_SPEED_LOW;
-		}
-
-		// Erase current player position
-		display[PLAYER_Y][(uint8_t)playerX] = ' ';
-
-		// Calculate new player position
-//		gyroData = angularDisplacement;
-		playerX += (angularDisplacement * GYRO_TO_DISP_FACTOR);
-		if (playerX < 0)
-			playerX = 0;
-		if (playerX > PLAYER_MAX_X + 0.9)
-			playerX = PLAYER_MAX_X;
-
-		// Calculate new obstacle position and check for collisions
-		if (obstacle->x < 0) {
-			obstacle->x = rand() % (PLAYER_MAX_X - OBSTACLE_EXTRA_WIDTH);
-			if (obstacle->x < OBSTACLE_EXTRA_WIDTH)
-				obstacle->x = OBSTACLE_EXTRA_WIDTH;
-			obstacle->y = 0;
+		BSP_GYRO_GetXYZ(gyroData);
+		if (calibrationCount < CALIBRATION_CYCLES){
+			calibrationAvg += gyroData[1] / CALIBRATION_CYCLES;
+			calibrationCount++;
 		}
 		else {
-			setObstacle(obstacle, (uint8_t)' ', OBSTACLE_EXTRA_WIDTH);
-			obstacle->y += obstacleSpeed;
-//			obstacle->y += OBSTACLE_SPEED;
-			// Check if obstacle has left the playing field
-			if (obstacle->y > DISPLAY_LENGTH_Y - 0.1){
-				obstacle->x = -1.0;
-				obstacle->y = -1.0;
-				isSuccess = 1;
-				clearedObstacle();
+			// begin leaky integrator after calibration period
+			if (!leakyGyroFlag) {
+				leakyGyro = calibrationAvg;
+				leakyGyroFlag = 1;
+			} else {
+				leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[1]);
 			}
-			// Check for collision
-			else if (collision(obstacle, (int8_t)playerX, OBSTACLE_EXTRA_WIDTH)){
-				isSuccess = 0;
-				gameOver();
-				return;
+
+			// update and clamp angular displacement
+			// we don't want it to shoot off to arithmetic overflow
+			angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
+			if (angularDisplacement > 90.0) {
+				angularDisplacement = 90.0;
+			} else if (angularDisplacement < -90.0) {
+				angularDisplacement = -90.0;
 			}
 		}
-		//clearBuf(buffer, 50);
-		//sprintf(buffer, "Gyroscope: x = %d, y = %d, z = %d", (int)gyroData[0], (int)gyroData[1], (int)gyroData[2]);
-		// These two magic strings clear the first line and set the cursor back to the top left corner
-		//HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 7, 100);
-//		display[playerY][playerX] = ' ';
-//		playerX++;
-//		if (playerX == DISPLAY_MAX_X - 1){
-//			playerX = 0;
-//			playerY++;
-//			if (playerY == DISPLAY_MAX_Y)
-//				playerY = 0;
+
+//		if (!HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin)){
+//			if (obstacleSpeed == OBSTACLE_SPEED_LOW)
+//				obstacleSpeed = OBSTACLE_SPEED_HIGH;
+//			else
+//				obstacleSpeed = OBSTACLE_SPEED_LOW;
 //		}
-		// Move player to new location
-		display[PLAYER_Y][(uint8_t)playerX] = PLAYER_CHAR;
-
-		// Update obstacle location
-		if (obstacle->x > -0.5)
-			setObstacle(obstacle, OBSTACLE_CHAR, OBSTACLE_EXTRA_WIDTH);
-//		ITM_Port32(31) = 2;
-		HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
-
-		// Print the buffer to UART
-		for (uint8_t i = 0; i < DISPLAY_LENGTH_Y; i++){
-			HAL_UART_Transmit(&huart1, display[i], DISPLAY_LENGTH_X, 100);
-		}
+//
+//		// Erase current player position
+//		display[PLAYER_Y][(uint8_t)playerX] = ' ';
+//
+//		// Calculate new player position
+////		gyroData = angularDisplacement;
+//		playerX += (angularDisplacement * GYRO_TO_DISP_FACTOR);
+//		if (playerX < 0)
+//			playerX = 0;
+//		if (playerX > PLAYER_MAX_X + 0.9)
+//			playerX = PLAYER_MAX_X;
+//
+//		// Calculate new obstacle position and check for collisions
+//		if (obstacle->x < 0) {
+//			obstacle->x = rand() % (PLAYER_MAX_X - OBSTACLE_EXTRA_WIDTH);
+//			if (obstacle->x < OBSTACLE_EXTRA_WIDTH)
+//				obstacle->x = OBSTACLE_EXTRA_WIDTH;
+//			obstacle->y = 0;
+//		}
+//		else {
+//			setObstacle(obstacle, (uint8_t)' ', OBSTACLE_EXTRA_WIDTH);
+//			obstacle->y += obstacleSpeed;
+////			obstacle->y += OBSTACLE_SPEED;
+//			// Check if obstacle has left the playing field
+//			if (obstacle->y > DISPLAY_LENGTH_Y - 0.1){
+//				obstacle->x = -1.0;
+//				obstacle->y = -1.0;
+//				isSuccess = 1;
+//				clearedObstacle();
+//			}
+//			// Check for collision
+//			else if (collision(obstacle, (int8_t)playerX, OBSTACLE_EXTRA_WIDTH)){
+//				isSuccess = 0;
+//				gameOver();
+//				return;
+//			}
+//		}
+//
+//		// Move player to new location
+//		display[PLAYER_Y][(uint8_t)playerX] = PLAYER_CHAR;
+//
+//		// Update obstacle location
+//		if (obstacle->x > -0.5)
+//			setObstacle(obstacle, OBSTACLE_CHAR, OBSTACLE_EXTRA_WIDTH);
+////		ITM_Port32(31) = 2;
+//		HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
+//
+//		// Print the buffer to UART
+//		for (uint8_t i = 0; i < DISPLAY_LENGTH_Y; i++){
+//			HAL_UART_Transmit(&huart1, display[i], DISPLAY_LENGTH_X, 100);
+//		}
 //		ITM_Port32(31) = 3;
-		HAL_TIM_Base_Start_IT(&htim3);
+//		HAL_TIM_Base_Start_IT(&htim3);
 	}
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM6) {
