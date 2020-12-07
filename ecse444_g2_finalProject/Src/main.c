@@ -750,7 +750,8 @@ void createTone(uint8_t *arr, float32_t freq)
 void clearedObstacle() {
 	if (BSP_QSPI_Read(sineArray, 0, TONE_BUF_LEN) != QSPI_OK)
 		Error_Handler();
-	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN >> 1, DAC_ALIGN_8B_R);
+	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN >> 2, DAC_ALIGN_8B_R);
+	successTone = 1;
 }
 
 void gameOver()
@@ -793,7 +794,16 @@ void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac)
 //		HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
 		if (isSuccess){
 			HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
-			isSuccess = 0;
+			if (successTone < SUCCESS_LEN){
+				if (BSP_QSPI_Read(sineArray, (uint32_t)(successTones[successTone]) * TONE_BUF_LEN, TONE_BUF_LEN) != QSPI_OK)
+									Error_Handler();
+				HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN >> 2, DAC_ALIGN_8B_R);
+				successTone++;
+			}
+			else {
+				isSuccess = 0;
+				successTone = 0;
+			}
 		}
 		else{
 			gameOverTone++;
