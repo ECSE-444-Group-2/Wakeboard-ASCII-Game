@@ -31,6 +31,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+// Typedef a position object to keep track of the obstacle more easily
 struct {
 	float x;
 	float y;
@@ -55,11 +56,10 @@ struct {
 #define PLAYER_CHAR						'^'
 
 // The position of the obstacle is determined by an index in the 2D
-// display array. Each object will have a width (and potentially
-// height) associated to them. This parameter specifies how many
-// extra indexes the object takes up on either side. For example,
-// if the obstacle is 5 indexes wide, OBSTACLE_EXTRA_WIDTH will be
-// 2.
+// display array. Each object has a width associated to them. This
+// parameter specifies how many extra indexes the object takes up
+// on either side of its center. In our case, the obstacle is 11
+// characters wide.
 #define OBSTACLE_EXTRA_WIDTH	5
 
 // How many indexes the obstacle will move each game loop. Could
@@ -68,30 +68,34 @@ struct {
 #define OBSTACLE_SPEED_HIGH		1.0
 //#define OBSTACLE_SPEED					0.5
 
-// ASCII symbol for the obstacles
+// ASCII symbol for the obstacle
 #define OBSTACLE_CHAR					'='
 
-// 20 kHz sampling frequency
+// 20 kHz sampling rate
 #define SAMP_FREQ							20000
 
 // Size of tone buffer
 #define TONE_BUF_LEN					(uint32_t)10000
 
-// Notes
+// Different tones used for the sound effects
 #define G_SIX_FREQ						1567.98
 #define A_FLAT_SIX_FREQ				1661.22
 #define A_SIX_FREQ						1760.00
 #define B_FLAT_SIX_FREQ				1864.66
 #define B_SIX_FREQ						1975.53
 
+// Length of the "game over" sound effect
 #define GAME_OVER_LEN					8
+
+// Length of the "obstacle avoided" sound effect
 #define SUCCESS_LEN						2
 
+// Parameters for sensor processing
 #define LEAKY_LAMBDA					0.95
 #define LEAKY_LAMBDA_COMP			0.05
-
 #define CALIBRATION_CYCLES		200
 
+// Approximate period of the game loop (in seconds)
 #define GAME_LOOP_PERIOD			0.1
 
 // ITM Port define
@@ -117,10 +121,11 @@ TIM_HandleTypeDef htim3;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-// NOTE: Display is [y][x], NOT [x][y]
+// The representation of the playing field for our game
+// NOTE: the coordinates are [y][x], not [x][y]!
 uint8_t display[DISPLAY_LENGTH_Y][DISPLAY_LENGTH_X];
 
-// Gyro stuff
+// Sensor processing variables
 float gyroData[3];
 uint8_t leakyGyroFlag = 0;
 float leakyGyro = 0.0;
@@ -128,23 +133,22 @@ float angularDisplacement = 0;
 uint8_t calibrationCount = 0;
 float calibrationAvg = 0.0;
 
-// Array of obstacles and counter for number of obstacles on-screen
-// Array will be sorted from youngest to oldest obstacle
+// The obstacle and its speed
 Pos *obstacle;
 float obstacleSpeed = OBSTACLE_SPEED_LOW;
 
-// Posistion of the player
+// X position of the player
+// playerY is constant, so it's defined as a macro
 float playerX = DISPLAY_LENGTH_X >> 1;
-// characterPosY is constant, so it's defined as a macro
 
-uint32_t blockSize;
-uint8_t gameOverTone;
-uint8_t successTone;
-
+// Variables for the "game over" sound effect
+uint8_t gameOverTone = 0;
 uint8_t gameOverTones[GAME_OVER_LEN] = {2,4,2,1,3,1,0,0};
+
+// Variables for the "obstacle avoided" sound effect
+uint8_t successTone;
 uint8_t successTones[SUCCESS_LEN] = {0,4};
 uint8_t isSuccess;
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -158,7 +162,6 @@ static void MX_I2C2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_QUADSPI_Init(void);
 /* USER CODE BEGIN PFP */
-//void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac1);
 void createTone(uint8_t *arr, float32_t freq);
 void gameOver();
 uint8_t collision(Pos *obstacle, int8_t newX, int8_t extraWidth);
@@ -210,12 +213,16 @@ int main(void)
   MX_TIM3_Init();
   MX_QUADSPI_Init();
   /* USER CODE BEGIN 2 */
-  // Initialize peripherals
-  // Gyro sensor
+  // Initialize gyro sensor
   BSP_GYRO_Init();
   BSP_GYRO_GetXYZ(gyroData);
 
-  // Set up display
+  // Initialize QSPI
+	if (BSP_QSPI_Init()){
+		Error_Handler();
+	}
+
+  // Clear serial monitor and initialize display array
   HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
   HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
   uint8_t i;
@@ -229,24 +236,12 @@ int main(void)
 		}
 	}
 
-  // Initialize obstacle
+  // Initialize the obstacle to be out of bounds
   obstacle = (Pos *) malloc(sizeof(Pos));
   obstacle->x = -1.0;
   obstacle->y = -1.0;
 
-  // Load sound files to flash
-
-  // Initialize QSPI
-  if (BSP_QSPI_Init()){
-  	Error_Handler();
-  }
-  // Set the block size
-	QSPI_Info *pInfo = (QSPI_Info *)malloc(sizeof(QSPI_Info));
-	BSP_QSPI_GetInfo(pInfo);
-	blockSize = pInfo->EraseSectorSize * 16;
-
 	// Erase 5 blocks for sounds
-//	BSP_QSPI_Erase_Chip();
 	for (int i = 0; i < 2; i++)
 		if (BSP_QSPI_Erase_Block(i) != QSPI_OK)
 			Error_Handler();
@@ -257,14 +252,10 @@ int main(void)
 	createTone(sineArray, G_SIX_FREQ);
 	if (BSP_QSPI_Write(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
 		Error_Handler();
-//	if (BSP_QSPI_Read(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
-//		Error_Handler();
 	currAddr += TONE_BUF_LEN;
 
 	createTone(sineArray, A_FLAT_SIX_FREQ);
 	if (BSP_QSPI_Write(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
-			Error_Handler();
-	if (BSP_QSPI_Read(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
 			Error_Handler();
 	currAddr += TONE_BUF_LEN;
 
@@ -282,16 +273,8 @@ int main(void)
 	if (BSP_QSPI_Write(sineArray, currAddr, TONE_BUF_LEN) != QSPI_OK)
 			Error_Handler();
 
-	// Load in first tone
-	gameOverTone = 0;
-//	if (BSP_QSPI_Read(sineArray, (uint32_t)(toneSequence[currTone]) * blockSize, TONE_BUF_LEN) != QSPI_OK)
-	if (BSP_QSPI_Read(sineArray, gameOverTones[gameOverTone] * TONE_BUF_LEN, TONE_BUF_LEN) != QSPI_OK)
-		Error_Handler();
-//	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
-
-  // Timers
+  // Start timers
   HAL_TIM_Base_Start_IT(&htim3);
-
   HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END 2 */
 
@@ -302,30 +285,13 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-//		BSP_GYRO_GetXYZ(gyroData);
-//		if (calibrationCount < CALIBRATION_CYCLES){
-//			calibrationAvg += gyroData[1] / CALIBRATION_CYCLES;
-//			calibrationCount++;
-//		}
-//		else {
-//			// begin leaky integrator after calibration period
-//			if (!leakyGyroFlag) {
-//				leakyGyro = calibrationAvg;
-//				leakyGyroFlag = 1;
-//			} else {
-//				leakyGyro = (LEAKY_LAMBDA * leakyGyro) + (LEAKY_LAMBDA_COMP * gyroData[1]);
-//			}
-//
-//			// update and clamp angular displacement
-//			// we don't want it to shoot off to arithmetic overflow
-//			angularDisplacement += (leakyGyro - calibrationAvg) * GAME_LOOP_PERIOD;
-//			if (angularDisplacement > 90.0) {
-//				angularDisplacement = 90.0;
-//			} else if (angularDisplacement < -90.0) {
-//				angularDisplacement = -90.0;
-//			}
-//		}
+  	//*******************
+  	//* GAME LOOP (~10 ms)
+  	//*******************
+
+  	// Only start the game once the system is done calibrating
   	if (calibrationCount >= CALIBRATION_CYCLES){
+  		// Check for a button press to change the difficulty
   		if (!HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin)){
 				if (obstacleSpeed == OBSTACLE_SPEED_LOW)
 					obstacleSpeed = OBSTACLE_SPEED_HIGH;
@@ -336,15 +302,14 @@ int main(void)
 			// Erase current player position
 			display[PLAYER_Y][(uint8_t)playerX] = ' ';
 
-			// Calculate new player position
-	//		gyroData = angularDisplacement;
+			// Calculate the new player position
 			playerX += (angularDisplacement * GYRO_TO_DISP_FACTOR);
 			if (playerX < 0)
 				playerX = 0;
 			if (playerX > PLAYER_MAX_X + 0.9)
 				playerX = PLAYER_MAX_X;
 
-			// Calculate new obstacle position and check for collisions
+			// If the obstacle is out of bounds, create a new one at the top of the screen
 			if (obstacle->x < 0) {
 				obstacle->x = rand() % (PLAYER_MAX_X - OBSTACLE_EXTRA_WIDTH);
 				if (obstacle->x < OBSTACLE_EXTRA_WIDTH)
@@ -352,39 +317,41 @@ int main(void)
 				obstacle->y = 0;
 			}
 			else {
+				// Otherwise, erase the old obstacle position and calculate the new position
 				setObstacle(obstacle, (uint8_t)' ', OBSTACLE_EXTRA_WIDTH);
 				obstacle->y += obstacleSpeed;
-	//			obstacle->y += OBSTACLE_SPEED;
+
 				// Check if obstacle has left the playing field
 				if (obstacle->y > DISPLAY_LENGTH_Y - 0.1){
 					obstacle->x = -1.0;
 					obstacle->y = -1.0;
 					isSuccess = 1;
+					// Play a sound effect
 					clearedObstacle();
 				}
 				// Check for collision
 				else if (collision(obstacle, (int8_t)playerX, OBSTACLE_EXTRA_WIDTH)){
 					isSuccess = 0;
+					// Game over screen and music
 					gameOver();
 				}
 			}
 
-			// Move player to new location
+			// Update the player location
 			display[PLAYER_Y][(uint8_t)playerX] = PLAYER_CHAR;
 
-			// Update obstacle location
+			// Update the obstacle location
 			if (obstacle->x > -0.5)
 				setObstacle(obstacle, OBSTACLE_CHAR, OBSTACLE_EXTRA_WIDTH);
-	//		ITM_Port32(31) = 2;
+
+			// Set the cursor of the serial monitor to the top left corner
 			HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
 
-			// Print the buffer to UART
+			// Draw the new frame of the game
 			for (uint8_t i = 0; i < DISPLAY_LENGTH_Y; i++){
 				HAL_UART_Transmit(&huart1, display[i], DISPLAY_LENGTH_X, 100);
 			}
   	}
-
-//		HAL_Delay(10);
   }
   /* USER CODE END 3 */
 }
@@ -734,6 +701,12 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/**
+  * @brief Fill an array of size TONE_BUF_LEN with a given frequency
+  * @param arr	The array that will hold the generated frequency
+  * @param freq	The frequency to be generated
+  * @retval None
+  */
 void createTone(uint8_t *arr, float32_t freq)
 {
 	float32_t smplsPerT, fValue, sinIndex;
@@ -747,6 +720,11 @@ void createTone(uint8_t *arr, float32_t freq)
 	}
 }
 
+/**
+  * @brief Initiate the "obstacle avoided" sound effect
+  * @param None
+  * @retval None
+  */
 void clearedObstacle() {
 	if (BSP_QSPI_Read(sineArray, 0, TONE_BUF_LEN) != QSPI_OK)
 		Error_Handler();
@@ -754,6 +732,11 @@ void clearedObstacle() {
 	successTone = 1;
 }
 
+/**
+  * @brief Display the "game over" screen and play the corresponding sound effect
+  * @param None
+  * @retval None
+  */
 void gameOver()
 {
 	HAL_TIM_Base_Stop_IT(&htim3);
@@ -766,6 +749,13 @@ void gameOver()
 	while(1);
 }
 
+/**
+  * @brief Calculate if a collision will occur between an obstacle and the player
+  * @param obstacle		A pointer to the obstacle that may be colliding with the player
+  * @param newX				The X coordinate of the player
+  * @param extraWidth	floor(widthOfObstacle / 2)
+  * @retval 1 if a collision occurs and 0 if no collision occurs
+  */
 uint8_t collision(Pos *obstacle, int8_t newX, int8_t extraWidth)
 {
 	int8_t i;
@@ -781,6 +771,13 @@ uint8_t collision(Pos *obstacle, int8_t newX, int8_t extraWidth)
 	return 0;
 }
 
+/**
+  * @brief Calculate if a collision will occur between an obstacle and the player
+  * @param obstacle		A pointer to the obstacle that will be displayed
+  * @param newChar		The character to be used for the obstacle
+  * @param extraWidth	floor(widthOfObstacle / 2)
+  * @retval None
+  */
 void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth)
 {
 	int8_t i;
@@ -791,32 +788,41 @@ void setObstacle(Pos *o, uint8_t newChar, int8_t extraWidth)
 void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac)
 {
 	if (hdac == &hdac1){
-//		HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
+		// Check if callback is for the "obstacle avoided" sound effect
 		if (isSuccess){
 			HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
+			// If so, check if it has played all the way through
 			if (successTone < SUCCESS_LEN){
+				// If not, play the next tone
 				if (BSP_QSPI_Read(sineArray, (uint32_t)(successTones[successTone]) * TONE_BUF_LEN, TONE_BUF_LEN) != QSPI_OK)
 									Error_Handler();
 				HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN >> 2, DAC_ALIGN_8B_R);
 				successTone++;
 			}
 			else {
+				// If so, reset variables
 				isSuccess = 0;
 				successTone = 0;
 			}
 		}
 		else{
+			// Callback for "game over" sound effect
 			gameOverTone++;
+			// Check if sound effect is still going through sequence
 			if (gameOverTone < GAME_OVER_LEN - 1){
+				// If so, load next tone
 				HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
 				if (BSP_QSPI_Read(sineArray, (uint32_t)(gameOverTones[gameOverTone]) * TONE_BUF_LEN, TONE_BUF_LEN) != QSPI_OK)
 					Error_Handler();
 				HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
 			}
+			// Check if the second last sound effect was just played
 			else if (gameOverTone == GAME_OVER_LEN - 1){
+				// If so, immediately play the same sound. This helps the audio sound cleaner
 				HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
 			}
 			else {
+				// Otherwise, stop the DAC and reset variables
 				HAL_DAC_Stop_DMA(hdac, DAC_CHANNEL_1);
 				gameOverTone = 0;
 			}
@@ -837,8 +843,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
 	if (htim->Instance == TIM3) {
-//		HAL_TIM_Base_Stop_IT(&htim3);
-		// it doesn't seem to like handing control back to main, so just poll here
 		BSP_GYRO_GetXYZ(gyroData);
 		if (calibrationCount < CALIBRATION_CYCLES){
 			calibrationAvg += gyroData[1] / CALIBRATION_CYCLES;
@@ -862,66 +866,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 				angularDisplacement = -90.0;
 			}
 		}
-
-//		if (!HAL_GPIO_ReadPin(BUTTON_GPIO_Port, BUTTON_Pin)){
-//			if (obstacleSpeed == OBSTACLE_SPEED_LOW)
-//				obstacleSpeed = OBSTACLE_SPEED_HIGH;
-//			else
-//				obstacleSpeed = OBSTACLE_SPEED_LOW;
-//		}
-//
-//		// Erase current player position
-//		display[PLAYER_Y][(uint8_t)playerX] = ' ';
-//
-//		// Calculate new player position
-////		gyroData = angularDisplacement;
-//		playerX += (angularDisplacement * GYRO_TO_DISP_FACTOR);
-//		if (playerX < 0)
-//			playerX = 0;
-//		if (playerX > PLAYER_MAX_X + 0.9)
-//			playerX = PLAYER_MAX_X;
-//
-//		// Calculate new obstacle position and check for collisions
-//		if (obstacle->x < 0) {
-//			obstacle->x = rand() % (PLAYER_MAX_X - OBSTACLE_EXTRA_WIDTH);
-//			if (obstacle->x < OBSTACLE_EXTRA_WIDTH)
-//				obstacle->x = OBSTACLE_EXTRA_WIDTH;
-//			obstacle->y = 0;
-//		}
-//		else {
-//			setObstacle(obstacle, (uint8_t)' ', OBSTACLE_EXTRA_WIDTH);
-//			obstacle->y += obstacleSpeed;
-////			obstacle->y += OBSTACLE_SPEED;
-//			// Check if obstacle has left the playing field
-//			if (obstacle->y > DISPLAY_LENGTH_Y - 0.1){
-//				obstacle->x = -1.0;
-//				obstacle->y = -1.0;
-//				isSuccess = 1;
-//				clearedObstacle();
-//			}
-//			// Check for collision
-//			else if (collision(obstacle, (int8_t)playerX, OBSTACLE_EXTRA_WIDTH)){
-//				isSuccess = 0;
-//				gameOver();
-//				return;
-//			}
-//		}
-//
-//		// Move player to new location
-//		display[PLAYER_Y][(uint8_t)playerX] = PLAYER_CHAR;
-//
-//		// Update obstacle location
-//		if (obstacle->x > -0.5)
-//			setObstacle(obstacle, OBSTACLE_CHAR, OBSTACLE_EXTRA_WIDTH);
-////		ITM_Port32(31) = 2;
-//		HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
-//
-//		// Print the buffer to UART
-//		for (uint8_t i = 0; i < DISPLAY_LENGTH_Y; i++){
-//			HAL_UART_Transmit(&huart1, display[i], DISPLAY_LENGTH_X, 100);
-//		}
-//		ITM_Port32(31) = 3;
-//		HAL_TIM_Base_Start_IT(&htim3);
 	}
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM6) {
