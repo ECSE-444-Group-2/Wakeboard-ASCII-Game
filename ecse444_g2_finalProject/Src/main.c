@@ -739,13 +739,18 @@ void clearedObstacle() {
   */
 void gameOver()
 {
+	// Stop sensor processing
 	HAL_TIM_Base_Stop_IT(&htim3);
+	// Clear screen and set cursor to top-left corner of serial monitor
 	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[f", 3, 100);
 	HAL_UART_Transmit(&huart1, (uint8_t *)"\033[2J", 4, 100);
+	// Print game over message
 	HAL_UART_Transmit(&huart1, (uint8_t *)"You lose :(", 11, 100);
+	// Play game over sound effect
 	if (BSP_QSPI_Read(sineArray, (uint32_t)(gameOverTones[gameOverTone]) * TONE_BUF_LEN, TONE_BUF_LEN) != QSPI_OK)
 		Error_Handler();
 	HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)sineArray, TONE_BUF_LEN, DAC_ALIGN_8B_R);
+	// Wait for player to restart
 	while(1);
 }
 
@@ -843,7 +848,14 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
 	if (htim->Instance == TIM3) {
+		//*********************
+		//* SENSOR PROCESSING
+		//*********************
+
+		// Get current sensor data
 		BSP_GYRO_GetXYZ(gyroData);
+
+		// Calibration sequence
 		if (calibrationCount < CALIBRATION_CYCLES){
 			calibrationAvg += gyroData[1] / CALIBRATION_CYCLES;
 			calibrationCount++;
